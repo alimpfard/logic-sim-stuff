@@ -1,0 +1,93 @@
+enum LogicalState {
+    Low
+    High
+    Z
+    X
+
+    function equals(this, anon other: LogicalState) -> bool {
+        return match this {
+            Low => match other {
+                Low => true
+                else => false
+            }
+            High => match other {
+                High => true
+                else => false
+            }
+            X => match other {
+                X => true
+                else => false
+            }
+            Z => match other {
+                Z => true
+                else => false
+            }
+        }
+    }
+}
+
+function logical_and(anon a: LogicalState, anon b: LogicalState) -> LogicalState => match a {
+    Low => LogicalState::Low
+    High => b
+    Z => match b {
+        Low => LogicalState::Low
+        High => LogicalState::Z
+        Z => LogicalState::Z
+        X => LogicalState::X
+    }
+    X => match b {
+        Low => LogicalState::Low
+        else => LogicalState::X
+    }
+}
+
+function logical_nand(anon a: LogicalState, anon b: LogicalState) -> LogicalState => logical_not(logical_and(a, b))
+
+function logical_nor(anon a: LogicalState, anon b: LogicalState) -> LogicalState => logical_not(logical_or(a, b))
+
+function logical_not(anon a: LogicalState) -> LogicalState => match a {
+    Low => LogicalState::High
+    High => LogicalState::Low
+    Z => LogicalState::Z
+    X => LogicalState::X
+}
+
+function logical_or(anon a: LogicalState, anon b: LogicalState) -> LogicalState => match a {
+    Low => b
+    High => LogicalState::High
+    Z => match b {
+        High => LogicalState::High
+        else => LogicalState::Z
+    }
+    X => match b {
+        Low => LogicalState::Low
+        High => LogicalState::High
+        Z => LogicalState::Z
+        X => LogicalState::X
+    }
+}
+
+function logical_xnor(anon a: LogicalState, anon b: LogicalState) -> LogicalState => logical_not(logical_xor(a, b))
+
+function logical_xor(anon a: LogicalState, anon b: LogicalState) -> LogicalState => match a {
+    Low => match b {
+        Low => LogicalState::Low
+        High => LogicalState::High
+        Z => LogicalState::Z
+        X => LogicalState::X
+    }
+    High => match b {
+        Low => LogicalState::High
+        High => LogicalState::Low
+        Z => LogicalState::Z
+        X => LogicalState::X
+    }
+    Z => match b {
+        X => LogicalState::X
+        else => LogicalState::Z
+    }
+    X => match b {
+        Z => LogicalState::Z
+        else => LogicalState::X
+    }
+}

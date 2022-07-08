@@ -1,0 +1,222 @@
+import parser { Parser, WireKind, ParsedCircuit, ParsedWire }
+import utils { none }
+import logic {
+    LogicalState,
+    logical_and,
+    logical_nand,
+    logical_nor,
+    logical_not,
+    logical_or,
+    logical_xnor,
+    logical_xor
+}
+
+struct Transition {
+    target: String
+    from: LogicalState
+    to: LogicalState
+
+    function create(target: String, to: LogicalState, state: CircuitState) -> Transition? {
+        let current = state.of(target)
+        if current.equals(to) {
+            return none<Transition>()
+        }
+        return Transition(target, from: current, to)
+    }
+}
+
+struct EventTargets {
+    targets: {usize}
+}
+
+struct EventRegistry {
+    events: [String:EventTargets]
+
+    function subscribe(mut this, sources: [usize], target: usize, circuit: ParsedCircuit) throws {
+        for source in sources.iterator() {
+            let name = circuit.wires[source].name
+            if .events.contains(name) {
+                .events[name].targets.add(target)
+            } else {
+                .events.set(name, EventTargets(targets: {target}))
+            }
+        }
+    }
+
+    function fired_events(this, emit: String) throws -> [usize] {
+        mut result: [usize] = []
+        let events = .events.get(emit)
+        if events.has_value() {
+            for target in events!.targets.iterator() {
+                result.push(target)
+            }
+        }
+        return result
+    }
+}
+
+struct NetlistState {
+    current: LogicalState
+    next: LogicalState?
+}
+
+class CircuitState {
+    public netlist: [String:NetlistState]
+    public event_registry: EventRegistry
+
+    public function of(this, anon target: String) -> LogicalState {
+        return this.netlist[target].current
+    }
+
+    public function next(mut this, anon target: String) -> LogicalState? {
+        let result = this.netlist[target].next
+        this.netlist[target].next = none<LogicalState>()
+        return result
+    }
+
+    public function schedule_next(mut this, anon target: String, next: LogicalState) {
+        this.netlist[target].next = next
+    }
+
+    public function set(mut this, anon target: String, value: LogicalState) {
+        this.netlist[target].current = value
+    }
+}
+
+function event_sources(anon sources: [i64], anon circuit: ParsedCircuit) throws -> [usize] {
+    mut result: [usize] = []
+    for source in sources.iterator() {
+        result.push(circuit.inverse_index_mappings[source])
+    }
+    return result
+}
+
+enum StepResult {
+    Stable
+    Continue
+}
+
+class CompiledCircuit {
+    public state: CircuitState
+    public name: String
+    public inputs: [usize]
+    public outputs: [usize]
+    public circuit: ParsedCircuit
+
+    public function compile(circuit: ParsedCircuit) throws -> CompiledCircuit {
+        mut state = CircuitState(
+            netlist: [:]
+            event_registry: EventRegistry(
+                events: [:]
+            )
+        )
+
+        for wire in circuit.wires.iterator() {
+            state.netlist[wire.name] = NetlistState(current: LogicalState::X, next: none<LogicalState>())
+            state.event_registry.subscribe(
+                sources: event_sources(wire.fan_ins, circuit)
+                target: wire.index
+                circuit
+            )
+            for fan_out in wire.fan_outs.iterator() {
+                state.event_registry.subscribe(
+                    sources: [wire.index]
+                    target: circuit.inverse_index_mappings[fan_out]
+                    circuit
+                )
+            }
+        }
+
+        return CompiledCircuit(
+            state: state
+            name: circuit.name
+            inputs: event_sources(circuit.inputs, circuit)
+            outputs: event_sources(circuit.outputs, circuit)
+            circuit
+        )
+    }
+
+    function evaluate(this, anon id: usize, anon value: LogicalState) throws -> LogicalState {
+        let wire = .circuit.wires[id]
+        mut inputs: [LogicalState] = []
+        for id in wire.fan_ins.iterator() {
+            inputs.push(.state.of(.circuit.wires[id].name))
+        }
+        return match wire.kind {
+            Input => value
+            And => logical_and(inputs[0], inputs[1])
+            Or => logical_or(inputs[0], inputs[1])
+            Xor => logical_xor(inputs[0], inputs[1])
+            Not => logical_not(inputs[0])
+            Nand => logical_nand(inputs[0], inputs[1])
+            Nor => logical_nor(inputs[0], inputs[1])
+            Xnor => logical_xnor(inputs[0], inputs[1])
+            From | Buffer => inputs[0]
+        }
+    }
+
+    function collect_transitions(mut this) throws -> [Transition] {
+        mut seen: [usize:LogicalState] = [:]
+        mut todo: [usize:LogicalState] = [:]
+        for input in .inputs.iterator() {
+            let next = .state.next(target: .circuit.wires[input].name)
+            if next.has_value() {
+                todo.set(input, next!)
+            }
+        }
+        while not todo.is_empty() {
+            let current = todo.iterator().next()!
+            todo.remove(current.0)
+            if seen.contains(current.0) {
+                if not seen[current.0].equals(current.1) {
+                    println("Transition race in {}, between {} and {}", .circuit.wires[current.0].name, seen[current.0], current.1)
+                }
+                continue
+            }
+            seen.set(current.0, current.1)
+            .state.schedule_next(target: .circuit.wires[current.0].name, next: current.1)
+
+            for event in .state.event_registry.fired_events(emit: .circuit.wires[current.0].name).iterator() {
+                todo.set(event, .evaluate(current.0, current.1))
+            }
+        }
+
+        mut result: [Transition] = []
+        for entry in seen.iterator() {
+            let transition = Transition::create(
+                target: .circuit.wires[entry.0].name
+                to: entry.1
+                state: .state
+            )
+            if transition.has_value() {
+                result.push(transition!)
+            }
+        }
+        return result
+    }
+
+    public function step(mut this) throws -> StepResult {
+        let transitions = .collect_transitions()
+        if transitions.is_empty() {
+            return StepResult::Stable
+        }
+
+        for transition in transitions.iterator() {
+            .state.set(target: transition.target, value: transition.to)
+        }
+        return StepResult::Continue
+    }
+
+    public function run(mut this, inputs: [usize:LogicalState]) throws {
+        for input in inputs.iterator() {
+            .state.schedule_next(target: .circuit.wires[input.0].name, next: input.1)
+        }
+        mut steps = 0
+        while .step() is Continue {
+            steps += 1
+        }
+
+        println("Finished in {} steps", steps)
+    }
+}
+
