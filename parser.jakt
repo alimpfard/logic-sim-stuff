@@ -128,6 +128,7 @@ struct ParsedCircuit {
     inputs: [i64]
     outputs: [i64]
     index_mappings: [usize:i64]
+    inverse_index_mappings: [i64:usize]
 
     function create(name: String) throws -> ParsedCircuit {
         return ParsedCircuit(
@@ -136,12 +137,14 @@ struct ParsedCircuit {
             inputs: []
             outputs: []
             index_mappings: [:]
+            inverse_index_mappings: [:]
         )
     }
 
     function add_wire(mut this, index: i64, wire: ParsedWire) throws -> usize {
         let id = this.wires.size()
         .index_mappings[this.wires.size()] = index
+        .inverse_index_mappings[index] = id
         .wires.push(wire)
         return id
     }
