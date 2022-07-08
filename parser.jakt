@@ -1,0 +1,324 @@
+import queue { ReallyShitQueue }
+import utils { map_to_integer, value_or_error, none }
+
+enum ParserErrorCodes: i32 {
+    ExhausedGenerator = 69
+    InvalidWireKind
+    InvalidFaultName
+    UnexpectedEndOfStream
+    RedefeinitionOfWire
+    UndefinedWireReference
+    InvalidFieldValue
+}
+
+struct PeekableIterator {
+    array: [String]
+    index: usize
+    peeked: Optional<String>
+
+    function create(anon it: [String]) -> PeekableIterator {
+        return PeekableIterator(
+            array: it
+            index: 0
+            peeked: none<String>()
+        )
+    }
+
+    function peek(mut this) -> String? {
+        if not .peeked.has_value() {
+            if .index == .array.size() {
+                .peeked = none<String>()
+            } else {
+                .peeked = .array[.index++]
+            }
+        }
+        return .peeked
+    }
+
+    function next(mut this) -> String? {
+        .peek()
+        let buf = .peeked
+        .peeked = none<String>()
+        .peek()
+        return buf
+    }
+
+    function take(mut this, anon n: i64) throws -> Array<String> {
+        mut result: [String] = []
+        for i in 0..n {
+            let next = .next()
+            if not next.has_value() {
+                throw Error::from_errno(ParserErrorCodes::ExhausedGenerator as! i32)
+            }
+            result.push(value: next!)
+        }
+        return result
+    }
+}
+
+enum WireKind {
+    Input
+    And
+    Nand
+    Or
+    Nor
+    Xor
+    Xnor
+    Buffer
+    Not
+    From
+
+    function from_name(name: String) throws -> WireKind => match name {
+        "inpt" => WireKind::Input
+        "and"  => WireKind::And
+        "nand" => WireKind::Nand
+        "or"   => WireKind::Or
+        "nor"  => WireKind::Nor
+        "xor"  => WireKind::Xor
+        "xnor" => WireKind::Xnor
+        "buff" => WireKind::Buffer
+        "not"  => WireKind::Not
+        "from" => WireKind::From
+        else   => {
+            throw Error::from_errno(ParserErrorCodes::InvalidWireKind as! i32)
+            // This is garbage.
+            yield WireKind::Input
+        }
+    }
+}
+
+enum Fault {
+    Sa0
+    Sa1
+
+    function from_name(anon name: String) throws -> Fault => match name {
+        ">sa0" => Fault::Sa0
+        ">sa1" => Fault::Sa1
+        else   => {
+            throw Error::from_errno(ParserErrorCodes::InvalidFaultName as! i32)
+            // This is garbage.
+            yield Fault::Sa0
+        }
+    }
+}
+
+class ParsedWire {
+    public name: String
+    public kind: WireKind
+    public index: usize
+    public fan_ins: [i64]
+    public fan_outs: [i64]
+    public faults: [Fault]
+
+    public function create(name: String) throws -> ParsedWire {
+        return ParsedWire(
+            name: name
+            kind: WireKind::Input
+            index: 0
+            fan_ins: []
+            fan_outs: []
+            faults: []
+        )
+    }
+}
+
+struct ParsedCircuit {
+    name: String
+    wires: [ParsedWire]
+    inputs: [i64]
+    outputs: [i64]
+    index_mappings: [usize:i64]
+
+    function create(name: String) throws -> ParsedCircuit {
+        return ParsedCircuit(
+            name: name
+            wires: []
+            inputs: []
+            outputs: []
+            index_mappings: [:]
+        )
+    }
+
+    function add_wire(mut this, index: i64, wire: ParsedWire) throws -> usize {
+        let id = this.wires.size()
+        .index_mappings[this.wires.size()] = index
+        .wires.push(wire)
+        return id
+    }
+
+    function wire_by_name(mut this, name: String) throws -> i64 {
+        mut found_index = none<i64>()
+        mut i = 0
+        for wire in .wires.iterator() {
+            if wire.name == name {
+                found_index = i
+                break
+            }
+            i += 1
+        }
+        if not found_index.has_value() {
+            throw Error::from_errno(ParserErrorCodes::UndefinedWireReference as! i32)
+        }
+
+        return .index_mappings[found_index!]
+    }
+}
+
+struct Parser {
+    stream: PeekableIterator
+    circuit: ParsedCircuit
+    queue: ReallyShitQueue
+
+    private function create(name: String, stream: [String]) throws -> Parser {
+        return Parser(
+            stream: PeekableIterator::create(stream),
+            circuit: ParsedCircuit::create(name),
+            queue: ReallyShitQueue(
+                data: Dictionary<usize, (i64, i64)>()
+                first: 0
+                last: 0
+            )
+        )
+    }
+
+    private function next(mut this) throws -> String {
+        let n = .stream.next()
+        if not n.has_value() {
+            throw Error::from_errno(ParserErrorCodes::UnexpectedEndOfStream as! i32)
+        }
+        return n!
+    }
+
+    private function parse_fault_list(mut this) throws -> Array<Fault> {
+        mut faults: [Fault] = []
+        loop {
+            let next_ = .stream.peek()
+            if not (next_.has_value() and next_!.byte_at(0) == b'>') {
+                break
+            }
+            faults.push(Fault::from_name(next_!))
+            .stream.next()
+        }
+
+        return faults
+    }
+
+    private function parse_node(mut this) throws -> ParsedWire? {
+        let next = .stream.next()
+        if not next.has_value() {
+            return none<ParsedWire>()
+        }
+        let index = value_or_error(next!.to_int(), Error::from_errno(ParserErrorCodes::UnexpectedEndOfStream as! i32))
+
+        let name = .next()
+        let kind = WireKind::from_name(name: .next())
+        mut wire = ParsedWire::create(name)
+        wire.kind = kind
+
+        let id = .circuit.add_wire(index: index as! i64, wire)
+        wire.index = id
+
+        mut fan_ins: [i64] = []
+        mut fan_outs: [i64] = []
+        mut faults: [Fault] = []
+
+        match kind {
+            From => {
+                let wire_name = .next()
+                let node_index = .circuit.wire_by_name(name: wire_name)
+                fan_ins.push(node_index)
+                faults = .parse_fault_list()
+            }
+            else => {
+                let fan_out_count = value_or_error(.next().to_int(), Error::from_errno(ParserErrorCodes::InvalidFieldValue as! i32))
+                let fan_in_count = value_or_error(.next().to_int(),  Error::from_errno(ParserErrorCodes::InvalidFieldValue as! i32))
+                faults = .parse_fault_list()
+                fan_ins = map_to_integer(.stream.take(fan_in_count as! i64))
+                if fan_in_count == 0 {
+                    .circuit.inputs.push(index as! i64)
+                }
+                if fan_out_count == 0 {
+                    .circuit.outputs.push(index as! i64)
+                }
+
+                .queue.enqueue((id as! i64, fan_out_count as! i64))
+            }
+        }
+
+        wire.fan_ins = fan_ins
+        wire.fan_outs = fan_outs
+        wire.faults = faults
+        return wire
+    }
+
+    function parse(name: String, stream: [String]) throws -> ParsedCircuit {
+        mut parser = Parser::create(name, stream)
+        loop {
+            let maybe_entry = parser.queue.dequeue()
+            if not maybe_entry.has_value() {
+                let node = parser.parse_node()
+                if not node.has_value() {
+                    break
+                }
+                continue
+            }
+
+            let entry = maybe_entry!
+            mut wire = parser.circuit.wires[entry.0]
+
+            for i in 0..entry.1 {
+                let node = parser.parse_node()
+                if not node.has_value() {
+                    throw Error::from_errno(ParserErrorCodes::UnexpectedEndOfStream as! i32)
+                }
+
+                wire.fan_outs.push(parser.circuit.index_mappings[node!.index])
+            }
+        }
+
+        return parser.circuit
+    }
+}
+
+function main(args: [String]) throws -> c_int {
+    let name = args[1]
+    mut file = File::open_for_reading(name)
+    let contents = file.read_all()
+    mut builder = StringBuilder::create()
+    mut split_contents: [String] = []
+    mut in_comment = false
+    for c in contents.iterator() {
+        if in_comment {
+            if c == b'\n' {
+                in_comment = false
+            } else {
+                continue
+            }
+        }
+        match c {
+            b'*' | b'\n' | b' ' | b'\t' | b'\v' | b'\f' | b'\r' => {
+                if c == b'*' {
+                    in_comment = true
+                }
+                if builder.length() == 0 {
+                    continue
+                }
+
+                split_contents.push(builder.to_string())
+                builder.clear()
+            }
+            else => {
+                builder.append(c)
+            }
+        }
+    }
+
+    if builder.length() > 0 {
+        split_contents.push(builder.to_string())
+    }
+
+    let circuit = Parser::parse(name, stream: split_contents)
+    println("{}", circuit)
+
+    return 0
+}

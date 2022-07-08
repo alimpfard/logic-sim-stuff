@@ -1,0 +1,21 @@
+struct ReallyShitQueue {
+    data: [usize:(i64, i64)]
+    first: usize
+    last: usize
+
+    function enqueue(mut this, anon value: (i64, i64)) throws {
+        .data.set(.last++, value)
+    }
+
+    function dequeue(mut this) -> (i64, i64)? {
+        if .first == .last {
+            let none: (i64, i64)? = None
+            return none
+        }
+
+        let result = .data[.first++]
+        .data.remove(key: .first - 1)
+
+        return result
+    }
+}

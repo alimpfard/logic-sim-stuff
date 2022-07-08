@@ -1,0 +1,21 @@
+function none<T>() -> T? { return None }
+function value_or_error<T, E>(anon x: T?, anon e: E) throws -> T {
+    if x.has_value() {
+        return x!
+    }
+
+    throw e
+    // FIXME: Fix this already
+    return x!
+}
+
+function map_to_integer(anon xs: [String]) throws -> [i64] {
+    mut ys: [i64] = []
+    ys.ensure_capacity(xs.size())
+    for x in xs.iterator() {
+        let xv = value_or_error(x.to_int(), Error::from_errno(15))
+        let y = (xv as! i64)
+        ys.push(y)
+    }
+    return ys
+}
