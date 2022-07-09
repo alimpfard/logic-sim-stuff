@@ -222,7 +222,6 @@ struct Parser {
         wire.index = id
 
         mut fan_ins: [i64] = []
-        mut fan_outs: [i64] = []
         mut faults: [Fault] = []
 
         match kind {
@@ -243,13 +242,10 @@ struct Parser {
                 if fan_out_count == 0 {
                     .circuit.outputs.push(index as! i64)
                 }
-
-                .queue.enqueue((id as! i64, fan_out_count as! i64))
             }
         }
 
         wire.fan_ins = fan_ins
-        wire.fan_outs = fan_outs
         wire.faults = faults
         return wire
     }
@@ -257,25 +253,15 @@ struct Parser {
     function parse(name: String, stream: [String]) throws -> ParsedCircuit {
         mut parser = Parser::create(name, stream)
         loop {
-            let maybe_entry = parser.queue.dequeue()
-            if not maybe_entry.has_value() {
-                let node = parser.parse_node()
-                if not node.has_value() {
-                    break
-                }
-                continue
+            if not parser.parse_node().has_value() {
+                break
             }
+        }
 
-            let entry = maybe_entry!
-            mut wire = parser.circuit.wires[entry.0]
-
-            for i in 0..entry.1 {
-                let node = parser.parse_node()
-                if not node.has_value() {
-                    throw Error::from_errno(ParserErrorCodes::UnexpectedEndOfStream as! i32)
-                }
-
-                wire.fan_outs.push(parser.circuit.index_mappings[node!.index])
+        for wire in parser.circuit.wires.iterator() {
+            for fan_in in wire.fan_ins.iterator() {
+                mut fan_in_wire = parser.circuit.wires[parser.circuit.inverse_index_mappings[fan_in]]
+                fan_in_wire.fan_outs.push(parser.circuit.index_mappings[wire.index])
             }
         }
 

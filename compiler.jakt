@@ -145,7 +145,7 @@ class CompiledCircuit {
         let wire = .circuit.wires[id]
         mut inputs: [LogicalState] = []
         for id in wire.fan_ins.iterator() {
-            inputs.push(.state.of(.circuit.wires[id].name))
+            inputs.push(.state.of(.circuit.wires[.circuit.inverse_index_mappings[id]].name))
         }
         if wire.kind is From {
             return DelayableState(state: inputs[0], has_delay: false)
@@ -167,36 +167,47 @@ class CompiledCircuit {
     }
 
     function collect_transitions(mut this) throws -> [Transition] {
-        mut seen: [usize:LogicalState] = [:]
-        mut todo: [usize:LogicalState] = [:]
+        mut seen: [usize:(usize, LogicalState)] = [:]
+        mut todo: [usize:(usize, LogicalState)] = [:]
         // println("Collecting transitions...")
         for net in .state.netlist.iterator() {
             let next = .state.next(target: net.0)
             if next.has_value() {
-                todo.set(.circuit.inverse_index_mappings[.circuit.wire_by_name(name: net.0)], next!)
+                let wire = .circuit.inverse_index_mappings[.circuit.wire_by_name(name: net.0)]
+                todo.set(wire, (wire, next!))
             }
         }
 
         while not todo.is_empty() {
             let current = todo.iterator().next()!
             todo.remove(current.0)
-            if seen.contains(current.0) {
-                if not seen[current.0].equals(current.1) {
-                    println("Transition race in {}, between {} and {}", .circuit.wires[current.0].name, seen[current.0], current.1)
-                }
-                continue
-            }
+            // if current.0 == current.1 .0 {
+            //     println("Self-driving wire: {}", .circuit.wires[current.0].name)
+            // }
+            // if seen.contains(current.0) {
+            //     // FIXME: .1.1 is parsed as .<float> :P
+            //     if not seen[current.0].1.equals(current.1 .1) {
+            //         println(
+            //             "Transition race in {}, between {} and {}, driven by {} and {}",
+            //             .circuit.wires[current.0].name,
+            //             seen[current.0].1,
+            //             current.1 .1,
+            //             .circuit.wires[seen[current.0].0].name
+            //             .circuit.wires[current.1 .0].name
+            //         )
+            //     }
+            // }
             seen.set(current.0, current.1)
-            .state.schedule_next(target: .circuit.wires[current.0].name, next: current.1)
+            .state.schedule_next(target: .circuit.wires[current.0].name, next: current.1 .1)
 
             for event in .state.event_registry.fired_events(emit: .circuit.wires[current.0].name).iterator() {
-                let new_state = .evaluate(current.0, current.1)
+                let new_state = .evaluate(current.0, current.1 .1)
 
-                if new_state.has_delay {
-                    seen.set(event, new_state.state)
+                if not new_state.has_delay {
+                    seen.set(event, (current.0, new_state.state))
                     .state.schedule_next(target: .circuit.wires[event].name, next: new_state.state)
                 } else {
-                    todo.set(event, new_state.state)
+                    todo.set(event, (current.0, new_state.state))
                 }
             }
         }
@@ -205,7 +216,7 @@ class CompiledCircuit {
         for entry in seen.iterator() {
             let transition = Transition::create(
                 target: .circuit.wires[entry.0].name
-                to: entry.1
+                to: entry.1 .1
                 state: .state
             )
             if transition.has_value() {
@@ -238,7 +249,7 @@ class CompiledCircuit {
             steps += 1
         }
 
-        // println("Finished in {} steps", steps)
+        println("Finished simulation in {} steps", steps)
     }
 }
 

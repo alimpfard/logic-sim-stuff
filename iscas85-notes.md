@@ -8,12 +8,13 @@ The format is fundamentally simple, it consists of multiple `<wire>`s, each of w
 - An ID
 - A name
 - A function (or "type")
-- A series of fanouts
 - A series of fanins
 - A series of faults
 
 The [original description](https://davidkebo.com/documents/iscas85.pdf) mentions that the fields are separated by whitespace (_any_ whitespace), but most files out in the wild use a one-wire-per-line form.
 This document uses the original definition of whitespace-separated fields.
+
+Note that while the fan-out count is given for each wire, it does not appear to be essential as the fan-in listings of other wires are sufficient to populate the fan-out list.
 
 There are, contrary to what the original document claims, three different "lines" (but really, there's only one major prodution):
 - Wire definitions
@@ -31,7 +32,7 @@ ISCFile         ::= Wire*
 Wire            ::= FanOutWire | RegularWire
 
 FanOutWire      ::= id:int S name S function:"from" S fanIn:name S FaultList
-RegularWire     ::= id:int S name S function:nonFromFunction S fanoutCount:int S faninCount:int S FaultList S? fanOut:Wire{fanoutCount, S} S? fanIn:int{faninCount, S}
+RegularWire     ::= id:int S name S function:nonFromFunction S fanoutCount:int S faninCount:int S FaultList S? fanIn:int{faninCount, S}
 
 FaultList       ::= fault{*, S}
 
@@ -53,8 +54,8 @@ The same as the original description, except the "name" field of `Wire` is split
 ```diff
 - FanOutWire      ::= id:int S name S function:"from" S fanIn:name S FaultList
 + FanOutWire      ::= id:int S id0:int S kind:Kind S function:"from" S fanIn:name S FaultList
-- RegularWire     ::= id:int S name S function:nonFromFunction S fanoutCount:int S faninCount:int S FaultList S? fanOut:Wire{fanoutCount, S} S? fanIn:int{faninCount, S}
-+ RegularWire     ::= id:int S id0:int S kind:Kind S function:nonFromFunction S fanoutCount:int S faninCount:int S FaultList S? fanOut:Wire{fanoutCount, S} S? fanIn:int{faninCount, S}
+- RegularWire     ::= id:int S name S function:nonFromFunction S fanoutCount:int S faninCount:int S FaultList S? fanIn:int{faninCount, S}
++ RegularWire     ::= id:int S id0:int S kind:Kind S function:nonFromFunction S fanoutCount:int S faninCount:int S FaultList S? fanIn:int{faninCount, S}
 +
 + Kind            ::= "gat" | "fan"
 ```

@@ -58,6 +58,10 @@ function main(args: [String]) throws -> c_int {
     let circuit = Parser::parse(name, stream: split_contents)
     // println("{}", circuit)
 
+    // for x in circuit.wires.iterator() {
+    //     println("{:0>2} wire {}: {} -({})-> {}", circuit.index_mappings[x.index], x.name, x.fan_ins, x.kind, x.fan_outs)
+    // }
+
     if should_list_inputs {
         for input in circuit.inputs.iterator() {
             println("- {}", circuit.wires[circuit.inverse_index_mappings[input]].name)
@@ -66,6 +70,15 @@ function main(args: [String]) throws -> c_int {
     }
 
     mut compiled_circuit = CompiledCircuit::compile(circuit)
+
+    // for x in compiled_circuit.state.event_registry.events.iterator() {
+    //     mut targets: [String] = []
+    //     for y in x.1.targets.iterator() {
+    //         targets.push(compiled_circuit.circuit.wires[y].name)
+    //     }
+    //     println("{:0>2} event {}: {}", compiled_circuit.circuit.wire_by_name(name: x.0), x.0, targets)
+    // }
+
     mut inputs: [usize:LogicalState] = [:]
     mut i = 0
     for arg in args.iterator() {
