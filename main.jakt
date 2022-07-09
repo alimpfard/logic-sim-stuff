@@ -3,7 +3,23 @@ import compiler { CompiledCircuit }
 import logic { LogicalState }
 
 function main(args: [String]) throws -> c_int {
-    let name = args[1]
+    if args.size() < 2 {
+        eprintln("Usage: {} [--list-inputs] [--entire-netlist] <input.isc> {net=value}*", args[0])
+        return 1
+    }
+
+    let should_list_inputs = args[1] == "--list-inputs"
+    mut arg_index = 1
+    if should_list_inputs {
+        arg_index += 1
+    }
+
+    let should_print_entire_netlist = args[arg_index] == "--entire-netlist"
+    if should_print_entire_netlist {
+        arg_index += 1
+    }
+
+    let name = args[arg_index]
     mut file = File::open_for_reading(name)
     let contents = file.read_all()
     mut builder = StringBuilder::create()
@@ -40,16 +56,52 @@ function main(args: [String]) throws -> c_int {
     }
 
     let circuit = Parser::parse(name, stream: split_contents)
-    println("{}", circuit)
+    // println("{}", circuit)
+
+    if should_list_inputs {
+        for input in circuit.inputs.iterator() {
+            println("- {}", circuit.wires[circuit.inverse_index_mappings[input]].name)
+        }
+        return 0
+    }
 
     mut compiled_circuit = CompiledCircuit::compile(circuit)
-    compiled_circuit.run(inputs: [
-        0uz: LogicalState::Low
-        1uz: LogicalState::Low
-        3uz: LogicalState::Low
-    ])
-    for net in compiled_circuit.state.netlist.iterator() {
-        println("{} = {}", net.0, net.1.current)
+    mut inputs: [usize:LogicalState] = [:]
+    mut i = 0
+    for arg in args.iterator() {
+        if i < arg_index + 1 {
+            i += 1
+            continue
+        }
+
+        i += 1
+        mut split_arg = arg.split('=')
+        if split_arg.size() != 2 {
+            eprintln("Invalid argument: {}", arg)
+            return 1
+        }
+        let wire_name = split_arg[0]
+        let wire_value = split_arg[1]
+
+        let wire_index = compiled_circuit.circuit.wire_by_name(name: wire_name)
+        let wire_id = compiled_circuit.circuit.inverse_index_mappings[wire_index]
+        let wire_state = LogicalState::from_string(wire_value)
+        inputs.set(wire_id, wire_state)
+    }
+
+    compiled_circuit.run(inputs)
+
+    if should_print_entire_netlist {
+        println("Entire netlist:")
+        for net in compiled_circuit.state.netlist.iterator() {
+            println("- {} = {}", net.0, net.1.current)
+        }
+    }
+
+    println("Output values:")
+    for output in compiled_circuit.circuit.outputs.iterator() {
+        let wire = compiled_circuit.circuit.wires[compiled_circuit.circuit.inverse_index_mappings[output]]
+        println("- {} = {}", wire.name, compiled_circuit.state.netlist[wire.name].current)
     }
 
     return 0

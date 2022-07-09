@@ -24,6 +24,20 @@ enum LogicalState {
             }
         }
     }
+
+    function from_string(anon s: String) throws -> LogicalState {
+        return match s {
+            "0" | "Low" | "low" | "l"  => LogicalState::Low
+            "1" | "High" | "high" | "h" => LogicalState::High
+            "X" | "x" => LogicalState::X
+            "Z" | "z" => LogicalState::Z
+            else => {
+                throw Error::from_errno(22)
+                // FIXME: This is useless
+                yield LogicalState::Z
+            }
+        }
+    }
 }
 
 function logical_and(anon a: LogicalState, anon b: LogicalState) -> LogicalState => match a {
