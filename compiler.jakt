@@ -169,10 +169,11 @@ class CompiledCircuit {
     function collect_transitions(mut this) throws -> [Transition] {
         mut seen: [usize:LogicalState] = [:]
         mut todo: [usize:LogicalState] = [:]
-        for input in .inputs.iterator() {
-            let next = .state.next(target: .circuit.wires[input].name)
+        // println("Collecting transitions...")
+        for net in .state.netlist.iterator() {
+            let next = .state.next(target: net.0)
             if next.has_value() {
-                todo.set(input, next!)
+                todo.set(.circuit.inverse_index_mappings[.circuit.wire_by_name(name: net.0)], next!)
             }
         }
 
@@ -216,6 +217,8 @@ class CompiledCircuit {
 
     public function step(mut this) throws -> StepResult {
         let transitions = .collect_transitions()
+        // println("Step, transitions are {}", transitions)
+
         if transitions.is_empty() {
             return StepResult::Stable
         }
@@ -230,12 +233,12 @@ class CompiledCircuit {
         for input in inputs.iterator() {
             .state.schedule_next(target: .circuit.wires[input.0].name, next: input.1)
         }
-        mut steps = 0
+        mut steps = 1
         while .step() is Continue {
             steps += 1
         }
 
-        println("Finished in {} steps", steps)
+        // println("Finished in {} steps", steps)
     }
 }
 
