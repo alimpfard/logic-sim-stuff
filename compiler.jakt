@@ -96,6 +96,11 @@ enum StepResult {
     Continue
 }
 
+struct DelayableState {
+    state: LogicalState
+    has_delay: bool
+}
+
 class CompiledCircuit {
     public state: CircuitState
     public name: String
@@ -136,13 +141,17 @@ class CompiledCircuit {
         )
     }
 
-    function evaluate(this, anon id: usize, anon value: LogicalState) throws -> LogicalState {
+    function evaluate(this, anon id: usize, anon value: LogicalState) throws -> DelayableState {
         let wire = .circuit.wires[id]
         mut inputs: [LogicalState] = []
         for id in wire.fan_ins.iterator() {
             inputs.push(.state.of(.circuit.wires[id].name))
         }
-        return match wire.kind {
+        if wire.kind is From {
+            return DelayableState(state: inputs[0], has_delay: false)
+        }
+
+        let new_value = match wire.kind {
             Input => value
             And => logical_and(inputs[0], inputs[1])
             Or => logical_or(inputs[0], inputs[1])
@@ -153,6 +162,8 @@ class CompiledCircuit {
             Xnor => logical_xnor(inputs[0], inputs[1])
             From | Buffer => inputs[0]
         }
+
+        return DelayableState(state: new_value, has_delay: true)
     }
 
     function collect_transitions(mut this) throws -> [Transition] {
@@ -164,6 +175,7 @@ class CompiledCircuit {
                 todo.set(input, next!)
             }
         }
+
         while not todo.is_empty() {
             let current = todo.iterator().next()!
             todo.remove(current.0)
@@ -177,7 +189,14 @@ class CompiledCircuit {
             .state.schedule_next(target: .circuit.wires[current.0].name, next: current.1)
 
             for event in .state.event_registry.fired_events(emit: .circuit.wires[current.0].name).iterator() {
-                todo.set(event, .evaluate(current.0, current.1))
+                let new_state = .evaluate(current.0, current.1)
+
+                if new_state.has_delay {
+                    seen.set(event, new_state.state)
+                    .state.schedule_next(target: .circuit.wires[event].name, next: new_state.state)
+                } else {
+                    todo.set(event, new_state.state)
+                }
             }
         }
 
