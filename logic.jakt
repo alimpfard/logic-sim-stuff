@@ -3,6 +3,8 @@ enum LogicalState {
     High
     Z
     X
+    D
+    DNeg
 
     function equals(this, anon other: LogicalState) -> bool {
         return match this {
@@ -22,6 +24,14 @@ enum LogicalState {
                 Z => true
                 else => false
             }
+            D => match other {
+                D => true
+                else => false
+            }
+            DNeg => match other {
+                DNeg => true
+                else => false
+            }
         }
     }
 
@@ -31,6 +41,8 @@ enum LogicalState {
             "1" | "High" | "high" | "h" => LogicalState::High
             "X" | "x" => LogicalState::X
             "Z" | "z" => LogicalState::Z
+            "D" | "d" => LogicalState::D
+            "DNeg" | "dneg" | "D-1" | "d-1" => LogicalState::DNeg
             else => {
                 throw Error::from_errno(22)
                 // FIXME: This is useless
@@ -48,10 +60,22 @@ function logical_and(anon a: LogicalState, anon b: LogicalState) -> LogicalState
         High => LogicalState::Z
         Z => LogicalState::Z
         X => LogicalState::X
+        D => LogicalState::D
+        DNeg => LogicalState::DNeg
     }
     X => match b {
         Low => LogicalState::Low
         else => LogicalState::X
+    }
+    D => match b {
+        DNeg | Low => LogicalState::Low
+        High | D => LogicalState::D
+        else => b
+    }
+    DNeg => match b {
+        DNeg | High => LogicalState::DNeg
+        Low | D => LogicalState::Low
+        else => b
     }
 }
 
@@ -64,6 +88,8 @@ function logical_not(anon a: LogicalState) -> LogicalState => match a {
     High => LogicalState::Low
     Z => LogicalState::Z
     X => LogicalState::X
+    D => LogicalState::DNeg
+    DNeg => LogicalState::D
 }
 
 function logical_or(anon a: LogicalState, anon b: LogicalState) -> LogicalState => match a {
@@ -74,34 +100,25 @@ function logical_or(anon a: LogicalState, anon b: LogicalState) -> LogicalState 
         else => LogicalState::Z
     }
     X => match b {
-        Low => LogicalState::Low
+        Low => LogicalState::X
         High => LogicalState::High
         Z => LogicalState::Z
         X => LogicalState::X
+        D => LogicalState::D
+        DNeg => LogicalState::DNeg
+    }
+    D => match b {
+        DNeg | High => LogicalState::High
+        Low | D => LogicalState::D
+        else => b
+    }
+    DNeg => match b {
+        DNeg | Low => LogicalState::DNeg
+        High | D => LogicalState::High
+        else => b
     }
 }
 
 function logical_xnor(anon a: LogicalState, anon b: LogicalState) -> LogicalState => logical_not(logical_xor(a, b))
 
-function logical_xor(anon a: LogicalState, anon b: LogicalState) -> LogicalState => match a {
-    Low => match b {
-        Low => LogicalState::Low
-        High => LogicalState::High
-        Z => LogicalState::Z
-        X => LogicalState::X
-    }
-    High => match b {
-        Low => LogicalState::High
-        High => LogicalState::Low
-        Z => LogicalState::Z
-        X => LogicalState::X
-    }
-    Z => match b {
-        X => LogicalState::X
-        else => LogicalState::Z
-    }
-    X => match b {
-        Z => LogicalState::Z
-        else => LogicalState::X
-    }
-}
+function logical_xor(anon a: LogicalState, anon b: LogicalState) -> LogicalState => logical_and(logical_or(a, b), logical_or(logical_not(a), logical_not(b)))
