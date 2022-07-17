@@ -19,6 +19,12 @@ function main(args: [String]) throws -> c_int {
         arg_index += 1
     }
 
+    mut default_input_init: String? = None
+    if args[arg_index] == "--init-all-inputs" {
+        default_input_init = args[++arg_index]
+        arg_index += 1
+    }
+
     let name = args[arg_index]
     mut file = File::open_for_reading(name)
     let contents = file.read_all()
@@ -80,6 +86,12 @@ function main(args: [String]) throws -> c_int {
     // }
 
     mut inputs: [usize:LogicalState] = [:]
+    if default_input_init.has_value() {
+        for input in circuit.inputs.iterator() {
+            inputs[circuit.inverse_index_mappings[input]] = LogicalState::from_string(name: default_input_init!)
+        }
+    }
+
     mut i = 0
     for arg in args.iterator() {
         if i < arg_index + 1 {
