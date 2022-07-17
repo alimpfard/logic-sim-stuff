@@ -199,17 +199,6 @@ class CompiledCircuit {
             // }
             seen.set(current.0, current.1)
             .state.schedule_next(target: .circuit.wires[current.0].name, next: current.1 .1)
-
-            for event in .state.event_registry.fired_events(emit: .circuit.wires[current.0].name).iterator() {
-                let new_state = .evaluate(current.0, current.1 .1)
-
-                if not new_state.has_delay {
-                    seen.set(event, (current.0, new_state.state))
-                    .state.schedule_next(target: .circuit.wires[event].name, next: new_state.state)
-                } else {
-                    todo.set(event, (current.0, new_state.state))
-                }
-            }
         }
 
         mut result: [Transition] = []
@@ -234,9 +223,30 @@ class CompiledCircuit {
             return StepResult::Stable
         }
 
+        mut next_transitions: [String:LogicalState] = [:]
         for transition in transitions.iterator() {
-            .state.set(target: transition.target, value: transition.to)
+            next_transitions.set(key: transition.target, value: transition.to)
         }
+
+        while not next_transitions.is_empty() {
+            let next = next_transitions.iterator().next()!
+            next_transitions.remove(next.0)
+
+            .state.set(target: next.0, value: next.1)
+
+            for event in .state.event_registry.fired_events(emit: next.0).iterator() {
+                let new_state = .evaluate(event, next.1)
+
+                if not new_state.has_delay {
+                    next_transitions.set(.circuit.wires[event].name, new_state.state)
+                } else {
+                    .state.schedule_next(target: .circuit.wires[event].name, next: new_state.state)
+                }
+            }
+        }
+        for transition in transitions.iterator() {
+        }
+
         return StepResult::Continue
     }
 
