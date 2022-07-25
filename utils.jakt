@@ -5,8 +5,6 @@ function value_or_error<T, E>(anon x: T?, anon e: E) throws -> T {
     }
 
     throw e
-    // FIXME: Fix this already
-    return x!
 }
 
 function map_to_integer(anon xs: [String]) throws -> [i64] {

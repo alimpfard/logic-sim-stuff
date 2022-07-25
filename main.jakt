@@ -25,6 +25,17 @@ function main(args: [String]) throws -> c_int {
         arg_index += 1
     }
 
+    mut generate_table = false
+    mut full_table = false
+    if args[arg_index] == "--generate-table" {
+        generate_table = true
+        arg_index += 1
+        if args[arg_index] == "full" {
+            arg_index += 1
+            full_table = true
+        }
+    }
+
     let name = args[arg_index]
     mut file = File::open_for_reading(name)
     let contents = file.read_all()
@@ -76,6 +87,82 @@ function main(args: [String]) throws -> c_int {
     }
 
     mut compiled_circuit = CompiledCircuit::compile(circuit)
+
+    if generate_table {
+        let number_of_inputs = circuit.inputs.size()
+        mut state = [LogicalState::Low; number_of_inputs]
+        mut i = 0
+
+        // Generate all possible inputs of [Low, High, X, Z]
+        mut multiplier = 1uz
+        if full_table {
+            multiplier = 2uz
+        }
+
+        mut inputs: [usize:LogicalState] = [:]
+        if multiplier * number_of_inputs > 64 {
+            eprintln("Too many inputs for table generation")
+            return 1
+        }
+
+        mut input_indices: {usize} = {}
+        for i in circuit.inputs.iterator() {
+            input_indices.add(circuit.inverse_index_mappings[i])
+        }
+
+        mut output_indices: {usize} = {}
+        for i in circuit.outputs.iterator() {
+            output_indices.add(circuit.inverse_index_mappings[i])
+        }
+
+        print("| Index / Values ")
+        mut ii = 0uz
+        for net in compiled_circuit.state.netlist.iterator() {
+            mut s = "| "
+            let current = ii++
+            if input_indices.contains(current) {
+                s += "[in] "
+            } else if output_indices.contains(current) {
+                s += "[out] "
+            }
+
+            print("{}{} ", s, net.0)
+        }
+        println("|")
+
+        print("| :- ")
+        for net in compiled_circuit.state.netlist.iterator() {
+            print("| -- ")
+        }
+        println("|")
+
+        for i in 0u64..(1u64 << (multiplier * number_of_inputs)) {
+            mut j = 0
+            for k in 0..number_of_inputs {
+                let two_bits = match full_table {
+                    true => (i >> (2uz * k)) & 3u64
+                    else => (i >> (1uz * k)) & 1u64
+                }
+                inputs[circuit.inverse_index_mappings[circuit.inputs[k]]] = match two_bits {
+                    0u64 => LogicalState::Low
+                    1u64 => LogicalState::High
+                    2u64 => LogicalState::X
+                    3u64 => LogicalState::Z
+                    else => LogicalState::Low
+                }
+            }
+
+            compiled_circuit.run(inputs)
+            print("| {} ", i)
+
+            for net in compiled_circuit.state.netlist.iterator() {
+                print("| `{}` ", net.1.current.name())
+            }
+
+            println("|")
+        }
+        return 0
+    }
 
     // for x in compiled_circuit.state.event_registry.events.iterator() {
     //     mut targets: [String] = []

@@ -50,6 +50,17 @@ enum LogicalState {
             }
         }
     }
+
+    function name(this) throws -> String {
+        return match this {
+            Low => "Low"
+            High => "High"
+            X => "X"
+            Z => "Z"
+            D => "D"
+            DNeg => "DNeg"
+        }
+    }
 }
 
 function logical_and(anon a: LogicalState, anon b: LogicalState) -> LogicalState => match a {

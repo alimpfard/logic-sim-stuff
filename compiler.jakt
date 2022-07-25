@@ -259,7 +259,7 @@ class CompiledCircuit {
             steps += 1
         }
 
-        println("Finished simulation in {} steps", steps)
+        eprintln("Finished simulation in {} steps", steps)
     }
 }
 

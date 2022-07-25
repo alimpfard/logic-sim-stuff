@@ -96,8 +96,6 @@ enum Fault {
         ">sa1" => Fault::Sa1
         else   => {
             throw Error::from_errno(ParserErrorCodes::InvalidFaultName as! i32)
-            // This is garbage.
-            yield Fault::Sa0
         }
     }
 }
