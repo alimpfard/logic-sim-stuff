@@ -1,5 +1,5 @@
 JAKT_HOME ?= /home/test/Documents/oss/jakt
-JAKT_COMPILER = $(JAKT_HOME)/target/debug/jakt
+JAKT_COMPILER = $(JAKT_HOME)/Build/jakt_stage3
 JAKT_RUNTIME_DIR = $(JAKT_HOME)/runtime
 
 ALL_JAKT_FILES = compiler.jakt logic.jakt main.jakt parser.jakt queue.jakt utils.jakt

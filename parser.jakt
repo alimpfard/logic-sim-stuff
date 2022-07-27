@@ -168,7 +168,7 @@ struct ParsedCircuit {
 struct Parser {
     stream: PeekableIterator
     circuit: ParsedCircuit
-    queue: ReallyShitQueue
+    queue: ReallyShitQueue<(i64, i64)>
 
     private function create(name: String, stream: [String]) throws -> Parser {
         return Parser(
