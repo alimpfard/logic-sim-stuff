@@ -1,6 +1,7 @@
 import parser { Parser, ParsedCircuit }
 import compiler { CompiledCircuit }
 import logic { LogicalState }
+import fault_analysis { FaultAnalyser }
 
 function main(args: [String]) throws -> c_int {
     if args.size() < 2 {
@@ -34,6 +35,12 @@ function main(args: [String]) throws -> c_int {
             arg_index += 1
             full_table = true
         }
+    }
+
+    mut analyse_faults = false
+    if args[arg_index] == "--analyse-faults" {
+        analyse_faults = true
+        arg_index += 1
     }
 
     let name = args[arg_index]
@@ -161,6 +168,12 @@ function main(args: [String]) throws -> c_int {
 
             println("|")
         }
+        return 0
+    }
+
+    if analyse_faults {
+        mut analyser = FaultAnalyser::from_circuit(circuit: compiled_circuit)
+        analyser.analyse_all()
         return 0
     }
 

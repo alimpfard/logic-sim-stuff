@@ -1,0 +1,663 @@
+import compiler
+import parser { Fault, WireKind }
+import logic {
+    LogicalState,
+    logical_and,
+    logical_nand,
+    logical_nor,
+    logical_not,
+    logical_or,
+    logical_xnor,
+    logical_xor,
+}
+import queue { ReallyShitQueue }
+
+enum GenerationResult {
+    Success
+    Failure
+}
+
+enum DLogic {
+    Zero
+    One
+    X
+    D
+    N
+    E
+
+    function is_d(this) => match this {
+        D | E => true
+        else => false
+    }
+
+    function from_fault(fault: Fault) => match fault {
+        Sa0 => DLogic::D
+        Sa1 => DLogic::E
+    }
+
+    function from_logic(anon logic: LogicalState) => match logic {
+        High => DLogic::One
+        Low => DLogic::Zero
+        X => DLogic::X
+        else => DLogic::N
+    }
+
+    function to_logic(this) => match this {
+        Zero => LogicalState::Low
+        One => LogicalState::High
+        X => LogicalState::X
+        // nonsensical mappings
+        D => LogicalState::High
+        E => LogicalState::Low
+        N => LogicalState::Z
+    }
+
+    function equals(this, anon other: DLogic) => match this {
+        Zero => other is Zero
+        One => other is One
+        X => other is X
+        D => other is D
+        N => other is N
+        E => other is E
+    }
+
+    function matches(this, anon other: DLogic) => match this {
+        Zero => other is Zero or other is X
+        One => other is One or other is X
+        X => true
+        D => other is D or other is X or other is One
+        N => other is N or other is X
+        E => other is E or other is X or other is Zero
+    }
+}
+
+struct FaultAnalyser {
+    circuit: compiler::CompiledCircuit
+    primitive_d_cubes: [i32:[(DLogic, DLogic, DLogic)]]
+    assignments: [String:DLogic]
+
+    function analyse_one(mut this, wire: usize, fault: Fault) throws -> [LogicalState]? {
+        let wire_value = .circuit.circuit.wires[wire]
+        if .d_algorithm(faulty_wire: wire_value.name, fault) {
+            mut tcase: [LogicalState] = []
+            for input in .primary_inputs().iterator() {
+                tcase.push(.get_assignment(input).to_logic())
+            }
+            return tcase
+        }
+
+        return None
+    }
+
+    function analyse_all(mut this) throws {
+        for wire in .circuit.circuit.wires.iterator() {
+            for fault in wire.faults.iterator() {
+                let result = .analyse_one(wire: wire.index, fault)
+                if result.has_value() {
+                    println("Found a case for {} on {}: {}", fault, wire.name, result!)
+                } else {
+                    println("Can't test {} on {}", fault, wire.name)
+                }
+            }
+        }
+    }
+
+    function test_with_inputs(mut this, wire: String, lhs: DLogic, rhs: DLogic) throws -> DLogic => match .element_type(gate: wire) {
+        And => DLogic::from_logic(logical_and(lhs.to_logic(), rhs.to_logic()))
+        Or => DLogic::from_logic(logical_or(lhs.to_logic(), rhs.to_logic()))
+        Nand => DLogic::from_logic(logical_nand(lhs.to_logic(), rhs.to_logic()))
+        Nor => DLogic::from_logic(logical_nor(lhs.to_logic(), rhs.to_logic()))
+        Xor => DLogic::from_logic(logical_xor(lhs.to_logic(), rhs.to_logic()))
+        Xnor => DLogic::from_logic(logical_xnor(lhs.to_logic(), rhs.to_logic()))
+        Not => DLogic::from_logic(logical_not(lhs.to_logic()))
+        else => lhs
+    }
+
+    function test(mut this, wire: String, inputs: [String]) throws -> DLogic => match .element_type(gate: wire) {
+        And => DLogic::from_logic(logical_and(.get_assignment(inputs[0]).to_logic(), .get_assignment(inputs[1]).to_logic()))
+        Or => DLogic::from_logic(logical_or(.get_assignment(inputs[0]).to_logic(), .get_assignment(inputs[1]).to_logic()))
+        Nand => DLogic::from_logic(logical_nand(.get_assignment(inputs[0]).to_logic(), .get_assignment(inputs[1]).to_logic()))
+        Nor => DLogic::from_logic(logical_nor(.get_assignment(inputs[0]).to_logic(), .get_assignment(inputs[1]).to_logic()))
+        Xor => DLogic::from_logic(logical_xor(.get_assignment(inputs[0]).to_logic(), .get_assignment(inputs[1]).to_logic()))
+        Xnor => DLogic::from_logic(logical_xnor(.get_assignment(inputs[0]).to_logic(), .get_assignment(inputs[1]).to_logic()))
+        Not => DLogic::from_logic(logical_not(.get_assignment(inputs[0]).to_logic()))
+        else => .get_assignment(inputs[0])
+    }
+
+    function d_algorithm(mut this, faulty_wire: String, fault: Fault) throws -> bool {
+        let fault_logic = DLogic::from_fault(fault)
+        .assign(wire: faulty_wire, value: fault_logic)
+
+        mut i0s: [DLogic] = []
+        mut i1s: [DLogic] = []
+
+        let element = .element_type(gate: faulty_wire).integral()
+        let cube = .primitive_d_cubes.get(element)
+        if not cube.has_value() {
+            println("Can't turn {} into a PDF :(", .element_type(gate: faulty_wire))
+            return false
+        }
+
+        for row in cube!.iterator() {
+            if row.2.equals(fault_logic) {
+                i0s.push(row.0)
+                i1s.push(row.1)
+            }
+        }
+
+
+        // FIXME: Try other stuff too.
+        let inputs = .get_inputs(gate: faulty_wire)
+        mut its = [i0s.first(), i1s.first()].iterator()
+        for input in inputs.iterator() {
+            .assign(wire: input, value: its.next()!!)
+        }
+
+        guard .d_algorithm_helper(tried_d_frontiers: [], activated_gate: faulty_wire) else {
+            return false
+        }
+
+        for gate in .all_gates().iterator() {
+            let inputs = .get_inputs(gate)
+            mut unassigned_count = 0
+            mut first_unassigned_input: String? = None
+            mut last_assigned_input: String? = None
+            for input in inputs.iterator() {
+                if .get_assignment(input) is X {
+                    unassigned_count += 1
+                    if not first_unassigned_input.has_value() {
+                        first_unassigned_input = input
+                    }
+                } else {
+                    last_assigned_input = input
+                }
+            }
+
+            guard unassigned_count == 1 else {
+                continue
+            }
+
+            let expected_output = .get_assignment(gate)
+            let last_assigned_input_value = match last_assigned_input.has_value() {
+                true => .get_assignment(last_assigned_input!)
+                else => DLogic::X
+            }
+
+            if expected_output.equals(.test_with_inputs(wire: gate, lhs: DLogic::One, rhs: last_assigned_input_value)) {
+                .assign(wire: gate, value: DLogic::One)
+            } else if expected_output.equals(.test_with_inputs(wire: gate, lhs: DLogic::Zero, rhs: last_assigned_input_value)) {
+                .assign(wire: gate, value: DLogic::Zero)
+            }
+        }
+
+        return true
+    }
+
+    function d_algorithm_helper(mut this, mut tried_d_frontiers: [String], activated_gate: String) throws -> bool {
+        mut d_frontiers = .d_frontiers()
+        mut j_frontiers = .j_frontiers()
+
+        if .has_conflict(exclude_gate: activated_gate) {
+            return false
+        }
+
+        mut d_reached_primary_output = false
+        for element in .primary_outputs().iterator() {
+            if .get_assignment(element).is_d() {
+                d_reached_primary_output = true
+                break
+            }
+        }
+
+        if not d_reached_primary_output and d_frontiers.is_empty() {
+            return false
+        }
+
+        while not d_reached_primary_output {
+            mut gate_to_try: String? = None
+            for gate in d_frontiers.iterator() {
+                if not tried_d_frontiers.contains(gate) {
+                    gate_to_try = gate
+                    tried_d_frontiers.push(gate)
+                    break
+                }
+            }
+
+            if not gate_to_try.has_value() {
+                break
+            }
+
+            let gate = gate_to_try!
+
+            let non_controlling_value = .non_controlling_value(gate)
+
+            // Set all unassigned inputs to non-controlling value
+            mut fault: DLogic? = None
+            for input in .get_inputs(gate).iterator() {
+                let assignment = .get_assignment(input)
+                if assignment is X {
+                    .assign(input, non_controlling_value)
+                } else {
+                    fault = assignment
+                }
+            }
+
+            let type = .element_type(gate)
+            if type is Nand or type is Nor {
+                if fault! is D {
+                    fault = DLogic::E
+                } else {
+                    fault = DLogic::D
+                }
+            }
+
+            .assign(.get_output(gate), fault!)
+
+            if .d_algorithm_helper(tried_d_frontiers, activated_gate) {
+                return true
+            }
+        }
+
+        if not d_reached_primary_output {
+            return false
+        }
+
+        let new_j_frontier = .j_frontiers()
+        if new_j_frontier.is_empty() {
+            return true
+        }
+
+        let a_gate = new_j_frontier[0]
+        let output = .get_assignment(.get_output(gate: a_gate)).to_logic()
+
+        let type = .element_type(gate: a_gate)
+
+        for lhs in [LogicalState::High, LogicalState::Low].iterator() {
+            for rhs in [LogicalState::High, LogicalState::Low].iterator() {
+                if match type {
+                    And => logical_and(lhs, rhs)
+                    Or => logical_or(lhs, rhs)
+                    Nand => logical_nand(lhs, rhs)
+                    Nor => logical_nor(lhs, rhs)
+                    Xor => logical_xor(lhs, rhs)
+                    Xnor => logical_xnor(lhs, rhs)
+                    Not => logical_not(lhs)
+                    else => lhs
+                }.equals(output) {
+                    let inputs = .get_inputs(gate: a_gate)
+                    match type {
+                        Not | Buffer | From => {
+                            .assign(inputs[0], DLogic::from_logic(lhs))
+                        }
+                        else => {
+                            .assign(inputs[0], DLogic::from_logic(lhs))
+                            .assign(inputs[1], DLogic::from_logic(rhs))
+                        }
+                    }
+                }
+            }
+        }
+
+        return .d_algorithm_helper(tried_d_frontiers, activated_gate)
+    }
+
+    // function step_path_sanitisation(mut this, mut first_run: bool) throws -> bool {
+    //     mut cj_frontiers = .cj_frontiers()
+
+    //     if not first_run and .has_conflict() {
+    //         return false
+    //     }
+
+    //     first_run = false
+
+    //     if cj_frontiers.is_empty() {
+    //         return true
+    //     }
+
+    //     let gate = cj_frontiers[0]
+    //     loop {
+    //         let gate_inputs = .get_inputs(gate)
+
+    //         mut unassigned_input: String? = None
+    //         for input in gate_inputs.iterator() {
+    //             if .get_assignment(input) is X {
+    //                 unassigned_input = input
+    //                 break
+    //             }
+    //         }
+
+    //         if not unassigned_input.has_value() {
+    //             break
+    //         }
+
+    //         .assign(unassigned_input!, DLogic::One)
+    //         if .step_path_sanitisation(first_run) {
+    //             return true
+    //         }
+
+    //         .assign(unassigned_input!, DLogic::Zero)
+    //     }
+
+    //     return false
+    // }
+
+    function non_controlling_value(mut this, gate: String) throws => match .element_type(gate) {
+        And | Nand => DLogic::One
+        Or | Nor => DLogic::Zero
+        else => {
+            println("Unsupported gate type :(")
+            yield DLogic::N
+        }
+    }
+
+    // function perform_path_sanitisation(mut this, mut path: [String]) throws -> bool {
+    //     // Init path wires
+    //     for name in path.iterator() {
+    //         .assign(name, DLogic::N, only_if_wire: true)
+    //     }
+
+    //     let c_frontiers = .c_frontiers()
+    //     for gate in c_frontiers.iterator() {
+    //         let non_controlling_value = .non_controlling_value(gate)
+
+    //         // Set all unassigned inputs to non-controlling value
+    //         mut fault: DLogic? = None
+    //         for input in .get_inputs(gate).iterator() {
+    //             let assignment = .get_assignment(input)
+    //             if assignment is X {
+    //                 .assign(input, non_controlling_value)
+    //             } else {
+    //                 fault = assignment
+    //             }
+    //         }
+
+    //         .assign(.get_output(gate), DLogic::N)
+    //     }
+
+    //     let result = .step_path_sanitisation(first_run: true)
+    //     if not .has_conflict() {
+    //         return true
+    //     }
+
+    //     return false
+    // }
+
+    function all_gates(this) throws -> [String] {
+        mut result: [String] = []
+        for wire in .circuit.circuit.wires.iterator() {
+            match wire.kind {
+                Input | Buffer | From => {
+                    continue
+                }
+                else => {}
+            }
+
+            result.push(wire.name)
+        }
+
+        return result
+    }
+
+    function get_output(this, gate: String) -> String {
+        return gate
+    }
+
+    function has_conflict(mut this, exclude_gate: String? = None) throws -> bool {
+        for wire in .circuit.circuit.wires.iterator() {
+            if wire.kind is Input or wire.kind is Buffer or wire.kind is From {
+                continue
+            }
+
+            if exclude_gate.has_value() and wire.name == exclude_gate! {
+                continue
+            }
+
+            let inputs = .get_inputs(gate: wire.name)
+            let output = .get_assignment(wire.name)
+            let expected_value = .test(wire: wire.name, inputs)
+            mut values: [DLogic] = []
+            for input in inputs.iterator() { values.push(.get_assignment(input)) }
+
+            if not output.matches(expected_value) {
+                mut found = false
+                for value in values.iterator() {
+                    if value is X {
+                        found = true
+                        break
+                    }
+                }
+
+                if not found {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    function cj_frontiers(this) -> [String] {
+        abort()
+    }
+
+    function j_frontiers(mut this) throws -> [String] {
+        mut result: [String] = []
+        for wire in .circuit.circuit.wires.iterator() {
+            if wire.kind is Input or wire.kind is Buffer or wire.kind is From {
+                continue
+            }
+
+            if .get_assignment(gate: wire.name) is X {
+                continue
+            }
+
+            let inputs = .get_inputs(gate: wire.name)
+            mut all_x = true
+            for input in inputs.iterator() {
+                if .get_assignment(wire: input) is X {
+                    continue
+                }
+
+                all_x = false
+                break
+            }
+
+            if all_x {
+                result.push(wire.name)
+            }
+        }
+        return result
+    }
+
+    function c_frontiers(this) -> [String] {
+        abort()
+    }
+
+    function d_frontiers(mut this) throws -> [String] {
+        mut result: [String] = []
+        for wire in .circuit.circuit.wires.iterator() {
+            guard .get_assignment(gate: wire.name) is X else {
+                continue
+            }
+
+            let inputs = .get_inputs(gate: wire.name)
+            for input in inputs.iterator() {
+                if .get_assignment(wire: input).is_d() {
+                    result.push(wire.name)
+                    break
+                }
+            }
+        }
+        return result
+    }
+
+    function get_inputs(mut this, gate: String) throws -> [String] {
+        let id = .circuit.circuit.wire_by_name(name: gate)
+        mut output: [String] = []
+        for fan_in in .circuit.circuit.wires[.circuit.circuit.inverse_index_mappings[id]].fan_ins.iterator() {
+            output.push(.circuit.circuit.wires[.circuit.circuit.inverse_index_mappings[fan_in]].name)
+        }
+        return output
+    }
+
+    function get_assignment(this, anon wire: String) -> DLogic => .assignments.get(wire) ?? DLogic::X
+
+    function assign(mut this, anon wire: String, anon value: DLogic, only_if_wire: bool = false) throws {
+        match only_if_wire {
+            false => { .assignments[wire] = value }
+            else => match .element_type(gate: wire) {
+                Input | Buffer | From => { .assignments[wire] = value }
+                else => {}
+            }
+        }
+    }
+
+    function element_type(mut this, gate: String) throws -> WireKind {
+        return .circuit.circuit.wires[.circuit.circuit.inverse_index_mappings[.circuit.circuit.wire_by_name(name: gate)]].kind
+    }
+
+    function primary_outputs(this) throws -> [String] {
+        mut result: [String] = []
+        for index in .circuit.circuit.outputs.iterator() {
+            result.push(.circuit.circuit.wires[.circuit.circuit.inverse_index_mappings[index]].name)
+        }
+        return result
+    }
+
+    function primary_inputs(this) throws -> [String] {
+        mut result: [String] = []
+        for index in .circuit.circuit.inputs.iterator() {
+            result.push(.circuit.circuit.wires[.circuit.circuit.inverse_index_mappings[index]].name)
+        }
+        return result
+    }
+ 
+    function from_circuit(circuit: compiler::CompiledCircuit) throws -> FaultAnalyser {
+        return FaultAnalyser(
+            circuit
+            primitive_d_cubes: [
+                (integral(WireKind::And)): [
+                    xs(DLogic::Zero, DLogic::X   , DLogic::Zero),
+                    xs(DLogic::X   , DLogic::Zero, DLogic::Zero),
+                    xs(DLogic::One , DLogic::One , DLogic::One) ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)   ,
+                    xs(DLogic::One , DLogic::One , DLogic::D)   ,
+                    xs(DLogic::Zero, DLogic::X   , DLogic::E)   ,
+                    xs(DLogic::X   , DLogic::Zero, DLogic::E)   ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)   ,
+                    xs(DLogic::E   , DLogic::One , DLogic::E)   ,
+                    xs(DLogic::D   , DLogic::One , DLogic::D)   ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)   ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)
+                ],
+                (integral(WireKind::Nand)): [
+                    xs(DLogic::Zero, DLogic::X   , DLogic::One) ,
+                    xs(DLogic::X   , DLogic::Zero, DLogic::One),
+                    xs(DLogic::One , DLogic::One , DLogic::Zero) ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)   ,
+                    xs(DLogic::One , DLogic::One , DLogic::E)   ,
+                    xs(DLogic::Zero, DLogic::X   , DLogic::D)   ,
+                    xs(DLogic::X   , DLogic::Zero, DLogic::D)   ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)   ,
+                    xs(DLogic::E   , DLogic::One , DLogic::D)   ,
+                    xs(DLogic::D   , DLogic::One , DLogic::E)   ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)   ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)
+                ],
+                (integral(WireKind::Or)): [
+                    xs(DLogic::Zero , DLogic::Zero , DLogic::Zero) ,
+                    xs(DLogic::X    , DLogic::One  , DLogic::One)  ,
+                    xs(DLogic::One  , DLogic::X    , DLogic::One)  ,
+                    xs(DLogic::N    , DLogic::N    , DLogic::N)    ,
+                    xs(DLogic::Zero , DLogic::Zero , DLogic::E)    ,
+                    xs(DLogic::X    , DLogic::One  , DLogic::D)    ,
+                    xs(DLogic::One  , DLogic::X    , DLogic::D)    ,
+                    xs(DLogic::N    , DLogic::N    , DLogic::N)    ,
+                    xs(DLogic::E    , DLogic::Zero , DLogic::E)    ,
+                    xs(DLogic::D    , DLogic::Zero , DLogic::D)    ,
+                    xs(DLogic::N    , DLogic::N    , DLogic::N)    ,
+                    xs(DLogic::N    , DLogic::N    , DLogic::N)
+                ],
+                (integral(WireKind::Nor)): [
+                    xs(DLogic::Zero, DLogic::Zero, DLogic::One) ,
+                    xs(DLogic::X   , DLogic::One , DLogic::Zero),
+                    xs(DLogic::One , DLogic::X   , DLogic::Zero),
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)   ,
+                    xs(DLogic::Zero, DLogic::Zero, DLogic::D)   ,
+                    xs(DLogic::X   , DLogic::One , DLogic::E)   ,
+                    xs(DLogic::One , DLogic::X   , DLogic::E)   ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)   ,
+                    xs(DLogic::E   , DLogic::Zero, DLogic::D)   ,
+                    xs(DLogic::D   , DLogic::Zero, DLogic::E)   ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)   ,
+                    xs(DLogic::N   , DLogic::N   , DLogic::N)
+                ],
+                (integral(WireKind::Xor)): [
+                    xs(DLogic::Zero, DLogic::Zero, DLogic::Zero),
+                    xs(DLogic::Zero, DLogic::One , DLogic::One) ,
+                    xs(DLogic::One , DLogic::Zero, DLogic::One) ,
+                    xs(DLogic::One , DLogic::One , DLogic::Zero),
+                    xs(DLogic::Zero, DLogic::One , DLogic::D)   ,
+                    xs(DLogic::One , DLogic::Zero, DLogic::D)   ,
+                    xs(DLogic::Zero, DLogic::Zero, DLogic::E)   ,
+                    xs(DLogic::One , DLogic::One , DLogic::E)   ,
+                    xs(DLogic::E   , DLogic::Zero, DLogic::E)   ,
+                    xs(DLogic::D   , DLogic::Zero, DLogic::D)   ,
+                    xs(DLogic::D   , DLogic::One , DLogic::E)   ,
+                    xs(DLogic::E   , DLogic::One , DLogic::D)   ,
+                ],
+                (integral(WireKind::Xnor)): [
+                    xs(DLogic::Zero, DLogic::Zero, DLogic::One) ,
+                    xs(DLogic::Zero, DLogic::One , DLogic::Zero) ,
+                    xs(DLogic::One , DLogic::Zero, DLogic::Zero),
+                    xs(DLogic::One , DLogic::One , DLogic::One) ,
+                    xs(DLogic::Zero, DLogic::Zero, DLogic::D)   ,
+                    xs(DLogic::One , DLogic::One , DLogic::D)   ,
+                    xs(DLogic::Zero, DLogic::One , DLogic::E)   ,
+                    xs(DLogic::One , DLogic::Zero, DLogic::E)   ,
+                    xs(DLogic::E   , DLogic::Zero, DLogic::D)   ,
+                    xs(DLogic::D   , DLogic::Zero, DLogic::E)   ,
+                    xs(DLogic::D   , DLogic::One , DLogic::D)   ,
+                    xs(DLogic::E   , DLogic::One , DLogic::E)   ,
+                ],
+                (integral(WireKind::Not)): [
+                    xs(DLogic::Zero , DLogic::N , DLogic::One) ,
+                    xs(DLogic::One  , DLogic::N , DLogic::Zero),
+                    xs(DLogic::N    , DLogic::N , DLogic::N)   ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)   ,
+                    xs(DLogic::Zero , DLogic::N , DLogic::D)   ,
+                    xs(DLogic::One  , DLogic::N , DLogic::E)   ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)   ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)   ,
+                    xs(DLogic::D    , DLogic::N , DLogic::E)   ,
+                    xs(DLogic::E    , DLogic::N , DLogic::D)   ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)   ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)
+                ],
+                (integral(WireKind::From)): [
+                    xs(DLogic::Zero , DLogic::N , DLogic::Zero) ,
+                    xs(DLogic::One  , DLogic::N , DLogic::One)  ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)    ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)    ,
+                    xs(DLogic::Zero , DLogic::N , DLogic::E)    ,
+                    xs(DLogic::One  , DLogic::N , DLogic::D)    ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)    ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)    ,
+                    xs(DLogic::D    , DLogic::N , DLogic::D)    ,
+                    xs(DLogic::E    , DLogic::N , DLogic::E)    ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)    ,
+                    xs(DLogic::N    , DLogic::N , DLogic::N)
+                ],
+                (integral(WireKind::Input)): [
+                ],
+            ]
+            assignments: [:]
+        )
+    }
+}
+
+function integral(anon kind: WireKind) -> i32 {
+    return kind.integral()
+}
+
+function xs(anon a: DLogic, anon b: DLogic, anon c: DLogic) => (a, b, c)

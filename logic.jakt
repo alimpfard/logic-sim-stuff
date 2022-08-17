@@ -35,6 +35,8 @@ enum LogicalState {
         }
     }
 
+    function is_d(this) => .equals(LogicalState::D) or .equals(LogicalState::DNeg)
+
     function from_string(anon s: String) throws -> LogicalState {
         return match s {
             "0" | "Low" | "low" | "l"  => LogicalState::Low

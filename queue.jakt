@@ -18,4 +18,6 @@ struct ReallyShitQueue<T> {
 
         return result
     }
+
+    function is_empty(this) -> bool => .first == .last
 }

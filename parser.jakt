@@ -85,6 +85,19 @@ enum WireKind {
             yield WireKind::Input
         }
     }
+
+    function integral(this) -> i32 => match this {
+        Input => 0
+        And => 1
+        Nand => 2
+        Or => 3
+        Nor => 4
+        Xor => 5
+        Xnor => 6
+        Buffer => 7
+        Not => 8
+        From => 9
+    }
 }
 
 enum Fault {
