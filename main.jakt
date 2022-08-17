@@ -177,15 +177,25 @@ function main(args: [String]) throws -> c_int {
         // Perform compaction
         let compacted_results = analyser.compact(results)
         for result in compacted_results.iterator() {
-            mut ns: [(String, Fault)] = []
-            for entry in result.1.iterator() {
-                let s = entry.split('>')
-                ns.push((
-                    s[0],
-                    Fault::from_name(s[1])
-                ))
+            mut inputs: [usize:LogicalState] = [:]
+            mut i = 0
+            for v in result.0.iterator() {
+                inputs[circuit.inverse_index_mappings[circuit.inputs[i++]]] = v
             }
-            println("{} for {}", test_name(result.0), ns)
+            compiled_circuit.run(inputs)
+
+            // mut ns: [(String, Fault)] = []
+            // for entry in result.1.iterator() {
+            //     let s = entry.split('>')
+            //     let fault = Fault::from_name(s[1])
+            //     ns.push((
+            //         s[0],
+            //         fault
+            //     ))
+
+            // }
+            // println("{} for {}", test_name(result.0), ns)
+
         }
         return 0
     }

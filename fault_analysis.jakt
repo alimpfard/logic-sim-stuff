@@ -314,7 +314,7 @@ struct FaultAnalyser {
             }
 
             let type = .element_type(gate)
-            if type is Nand or type is Nor {
+            if type is Nand or type is Nor or type is Not {
                 if fault! is D {
                     fault = DLogic::E
                 } else {
