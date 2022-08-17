@@ -274,6 +274,36 @@ struct Parser {
             }
         }
 
+        mut largest_index = 0
+        for wire in parser.circuit.wires.iterator() {
+            let index = parser.circuit.index_mappings[wire.index]
+            if index > largest_index {
+                largest_index = index
+            }
+        }
+
+        for wire in parser.circuit.wires[0..parser.circuit.wires.size()].iterator() {
+            guard wire.fan_ins.size() > 2 else { continue }
+
+            // If the wire has N (N>2) inputs, split the wire into N-1 cascading instances.
+            mut fan_ins = wire.fan_ins
+            wire.fan_ins = [wire.fan_ins.pop()!]
+
+            mut previous_fan_out = fan_ins.pop()!
+            for fan_in in fan_ins.iterator() {
+                mut new_wire = ParsedWire::create(name: format("{}.{}", wire.name, fan_in))
+                new_wire.kind = wire.kind
+                new_wire.fan_ins = [fan_in, previous_fan_out]
+                new_wire.faults = []
+                let index = ++largest_index
+                new_wire.index = parser.circuit.add_wire(index, wire: new_wire)
+
+                previous_fan_out = index
+            }
+
+            wire.fan_ins.push(previous_fan_out)
+        }
+
         for wire in parser.circuit.wires.iterator() {
             for fan_in in wire.fan_ins.iterator() {
                 mut fan_in_wire = parser.circuit.wires[parser.circuit.inverse_index_mappings[fan_in]]

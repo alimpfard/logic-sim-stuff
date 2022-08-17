@@ -79,7 +79,7 @@ function main(args: [String]) throws -> c_int {
         split_contents.push(builder.to_string())
     }
 
-    let circuit = Parser::parse(name, stream: split_contents)
+    mut circuit = Parser::parse(name, stream: split_contents)
     // println("{}", circuit)
 
     // for x in circuit.wires.iterator() {
@@ -126,7 +126,7 @@ function main(args: [String]) throws -> c_int {
         mut ii = 0uz
         for net in compiled_circuit.state.netlist.iterator() {
             mut s = "| "
-            let current = ii++
+            let current = circuit.inverse_index_mappings[circuit.wire_by_name(name: net.0)]
             if input_indices.contains(current) {
                 s += "[in] "
             } else if output_indices.contains(current) {

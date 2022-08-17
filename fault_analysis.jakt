@@ -219,7 +219,7 @@ struct FaultAnalyser {
             let next = its.next()
             if not next.has_value() {
                 eprintln("Gate with more than two inputs ({} of type {}), I can't deal with this :(", faulty_wire, .element_type(gate: faulty_wire))
-                break
+                abort()
             }
             .assign(wire: input, value: next!!)
         }
@@ -372,83 +372,11 @@ struct FaultAnalyser {
         return .d_algorithm_helper(tried_d_frontiers, activated_gate)
     }
 
-    // function step_path_sanitisation(mut this, mut first_run: bool) throws -> bool {
-    //     mut cj_frontiers = .cj_frontiers()
-
-    //     if not first_run and .has_conflict() {
-    //         return false
-    //     }
-
-    //     first_run = false
-
-    //     if cj_frontiers.is_empty() {
-    //         return true
-    //     }
-
-    //     let gate = cj_frontiers[0]
-    //     loop {
-    //         let gate_inputs = .get_inputs(gate)
-
-    //         mut unassigned_input: String? = None
-    //         for input in gate_inputs.iterator() {
-    //             if .get_assignment(input) is X {
-    //                 unassigned_input = input
-    //                 break
-    //             }
-    //         }
-
-    //         if not unassigned_input.has_value() {
-    //             break
-    //         }
-
-    //         .assign(unassigned_input!, DLogic::One)
-    //         if .step_path_sanitisation(first_run) {
-    //             return true
-    //         }
-
-    //         .assign(unassigned_input!, DLogic::Zero)
-    //     }
-
-    //     return false
-    // }
-
     function non_controlling_value(mut this, gate: String) throws => match .element_type(gate) {
         And | Nand => DLogic::One
         Or | Nor => DLogic::Zero
         else => DLogic::One
     }
-
-    // function perform_path_sanitisation(mut this, mut path: [String]) throws -> bool {
-    //     // Init path wires
-    //     for name in path.iterator() {
-    //         .assign(name, DLogic::N, only_if_wire: true)
-    //     }
-
-    //     let c_frontiers = .c_frontiers()
-    //     for gate in c_frontiers.iterator() {
-    //         let non_controlling_value = .non_controlling_value(gate)
-
-    //         // Set all unassigned inputs to non-controlling value
-    //         mut fault: DLogic? = None
-    //         for input in .get_inputs(gate).iterator() {
-    //             let assignment = .get_assignment(input)
-    //             if assignment is X {
-    //                 .assign(input, non_controlling_value)
-    //             } else {
-    //                 fault = assignment
-    //             }
-    //         }
-
-    //         .assign(.get_output(gate), DLogic::N)
-    //     }
-
-    //     let result = .step_path_sanitisation(first_run: true)
-    //     if not .has_conflict() {
-    //         return true
-    //     }
-
-    //     return false
-    // }
 
     function all_gates(this) throws -> [String] {
         mut result: [String] = []
