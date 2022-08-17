@@ -61,13 +61,52 @@ enum DLogic {
         E => other is E
     }
 
-    function matches(this, anon other: DLogic) => match this {
-        Zero => other is Zero or other is X
-        One => other is One or other is X
-        X => true
-        D => other is D or other is X or other is One
-        N => other is N or other is X
-        E => other is E or other is X or other is Zero
+    function matches(this, anon other: DLogic) => .intersect(other).has_value()
+
+    function intersect(this, anon other: DLogic) -> DLogic? => match this {
+        Zero => match other {
+            Zero | X => Some(DLogic::Zero)
+            else => None
+        }
+        One => match other {
+            One | X => Some(DLogic::One)
+            else => None
+        }
+        X => other
+        D => match other {
+            D | X | One => Some(DLogic::D)
+            else => None
+        }
+        N => match other {
+            N | X => Some(DLogic::N)
+            else => None
+        }
+        E => match other {
+            E | X | Zero => Some(DLogic::E)
+            else => None
+        }
+    } 
+}
+
+function intersect(anon xs: [LogicalState], anon ys: [LogicalState]) throws -> [LogicalState]? {
+    mut it_x = xs.iterator()
+    mut it_y = ys.iterator()
+    mut result: [LogicalState] = []
+
+    loop {
+        let x = it_x.next()
+        let y = it_y.next()
+
+        if not x.has_value() or not y.has_value() {
+            return result
+        }
+
+        let intersection = DLogic::from_logic(x!).intersect(DLogic::from_logic(y!))
+        if not intersection.has_value() {
+            return None
+        }
+
+        result.push(intersection!.to_logic())
     }
 }
 
@@ -75,6 +114,29 @@ struct FaultAnalyser {
     circuit: compiler::CompiledCircuit
     primitive_d_cubes: [i32:[(DLogic, DLogic, DLogic)]]
     assignments: [String:DLogic]
+
+    function compact(this, results: [String:[LogicalState]]) throws -> [([LogicalState], [String])] {
+        mut compacted_values: [([LogicalState], [String])] = []
+        for entry in results.iterator() {
+            let (name, test_case) = entry
+            mut found = false
+            for value in compacted_values.iterator() {
+                let intersection = intersect(value.0, test_case)
+                if intersection.has_value() {
+                    value.1.push(name)
+                    value.0 = intersection!
+                    found = true
+                    break
+                }
+            }
+
+            if not found {
+                compacted_values.push((test_case, [name]))
+            }
+        }
+
+        return compacted_values
+    }
 
     function analyse_one(mut this, wire: usize, fault: Fault) throws -> [LogicalState]? {
         let wire_value = .circuit.circuit.wires[wire]
@@ -89,17 +151,18 @@ struct FaultAnalyser {
         return None
     }
 
-    function analyse_all(mut this) throws {
+    function analyse_all(mut this) throws -> [String:[LogicalState]] {
+        mut output: [String:[LogicalState]] = [:]
         for wire in .circuit.circuit.wires.iterator() {
             for fault in wire.faults.iterator() {
                 let result = .analyse_one(wire: wire.index, fault)
                 if result.has_value() {
-                    println("Found a case for {} on {}: {}", fault, wire.name, result!)
-                } else {
-                    println("Can't test {} on {}", fault, wire.name)
+                    output[format("{}{}", wire.name, fault.to_name())] = result!
                 }
             }
         }
+
+        return output
     }
 
     function test_with_inputs(mut this, wire: String, lhs: DLogic, rhs: DLogic) throws -> DLogic => match .element_type(gate: wire) {
@@ -145,12 +208,20 @@ struct FaultAnalyser {
             }
         }
 
+        if i0s.is_empty() {
+            return false
+        }
 
         // FIXME: Try other stuff too.
         let inputs = .get_inputs(gate: faulty_wire)
         mut its = [i0s.first(), i1s.first()].iterator()
         for input in inputs.iterator() {
-            .assign(wire: input, value: its.next()!!)
+            let next = its.next()
+            if not next.has_value() {
+                eprintln("Gate with more than two inputs ({} of type {}), I can't deal with this :(", faulty_wire, .element_type(gate: faulty_wire))
+                break
+            }
+            .assign(wire: input, value: next!!)
         }
 
         guard .d_algorithm_helper(tried_d_frontiers: [], activated_gate: faulty_wire) else {
@@ -344,10 +415,7 @@ struct FaultAnalyser {
     function non_controlling_value(mut this, gate: String) throws => match .element_type(gate) {
         And | Nand => DLogic::One
         Or | Nor => DLogic::Zero
-        else => {
-            println("Unsupported gate type :(")
-            yield DLogic::N
-        }
+        else => DLogic::One
     }
 
     // function perform_path_sanitisation(mut this, mut path: [String]) throws -> bool {
@@ -649,6 +717,10 @@ struct FaultAnalyser {
                     xs(DLogic::N    , DLogic::N , DLogic::N)
                 ],
                 (integral(WireKind::Input)): [
+                ],
+                (integral(WireKind::Buffer)): [
+                    xs(DLogic::D    , DLogic::N , DLogic::D)
+                    xs(DLogic::E    , DLogic::N , DLogic::E)
                 ],
             ]
             assignments: [:]

@@ -1,4 +1,4 @@
-import parser { Parser, ParsedCircuit }
+import parser { Parser, ParsedCircuit, Fault }
 import compiler { CompiledCircuit }
 import logic { LogicalState }
 import fault_analysis { FaultAnalyser }
@@ -173,7 +173,20 @@ function main(args: [String]) throws -> c_int {
 
     if analyse_faults {
         mut analyser = FaultAnalyser::from_circuit(circuit: compiled_circuit)
-        analyser.analyse_all()
+        let results = analyser.analyse_all()
+        // Perform compaction
+        let compacted_results = analyser.compact(results)
+        for result in compacted_results.iterator() {
+            mut ns: [(String, Fault)] = []
+            for entry in result.1.iterator() {
+                let s = entry.split('>')
+                ns.push((
+                    s[0],
+                    Fault::from_name(s[1])
+                ))
+            }
+            println("{} for {}", test_name(result.0), ns)
+        }
         return 0
     }
 
@@ -230,4 +243,19 @@ function main(args: [String]) throws -> c_int {
     }
 
     return 0
+}
+
+function test_name(anon xs: [LogicalState]) throws -> String {
+    mut s = StringBuilder::create()
+    for x in xs.iterator() {
+        s.append(match x {
+            Low => b'0'
+            High => b'1'
+            X => b'X'
+            Z => b'Z'
+            else => b'?'
+        })
+    }
+
+    return s.to_string()
 }

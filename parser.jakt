@@ -105,11 +105,16 @@ enum Fault {
     Sa1
 
     function from_name(anon name: String) throws -> Fault => match name {
-        ">sa0" => Fault::Sa0
-        ">sa1" => Fault::Sa1
+        "sa0" | ">sa0" => Fault::Sa0
+        "sa1" | ">sa1" => Fault::Sa1
         else   => {
             throw Error::from_errno(ParserErrorCodes::InvalidFaultName as! i32)
         }
+    }
+
+    function to_name(this) -> String => match this {
+        Fault::Sa0 => ">sa0"
+        Fault::Sa1 => ">sa1"
     }
 }
 
