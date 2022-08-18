@@ -1,0 +1,16 @@
+on:
+  push:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - id: setup
+        uses: alimpfard/setup-jakt@v0
+        with:
+          cache: true
+      - name: build
+        run: make JAKT_COMPILER=$JAKT_COMPILER JAKT_RUNTIME=$JAKT_RUNTIME
