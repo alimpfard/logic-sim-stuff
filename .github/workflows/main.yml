@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - id: setup
-        uses: alimpfard/setup-jakt@v0
+        uses: alimpfard/setup-jakt@v1
         with:
           cache: true
       - name: build
